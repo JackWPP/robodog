@@ -16,8 +16,8 @@ DEFAULT_POSTURE = {
 }
 
 # 速度参数 - 减小增量使控制更精细
-SPEED_INCREMENT = 0.8  # 从0.1降低到0.05，使变化更平滑
-MAX_SPEED = 4.0  # 降低最大速度，使控制更稳定
+SPEED_INCREMENT = 0.1  # 从0.1降低到0.05，使变化更平滑
+MAX_SPEED = 2.0  # 降低最大速度，使控制更稳定
 MIN_SPEED = -1.0
 
 # 新增：参数平滑设置
@@ -234,7 +234,7 @@ def keyboard_control_loop(dog):
 
 if __name__ == '__main__':
     # 替换为您的机器狗IP地址
-    host = '192.168.31.148'  # 默认值，根据实际情况修改
+    host = '192.168.139.67'  # 默认值，根据实际情况修改
     
     try:
         with Dog(host=host) as dog:
