@@ -9,6 +9,15 @@ from robodog import Dog, UserMode
 import sys
 import os
 
+# 添加dance模块导入
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__))))
+try:
+    from dance.core.simple_actions import DanceExecutor, SimplePose
+except ImportError:
+    print("警告: 无法导入dance模块，跳舞功能将不可用")
+    DanceExecutor = None
+    SimplePose = None
+
 class RobodogUnifiedGUI:
     def __init__(self):
         # 连接参数
@@ -30,14 +39,18 @@ class RobodogUnifiedGUI:
         self.keyboard_listener = None
         self.pressed_keys = set()
         self.gui_pressed_keys = set()  # GUI按钮按下状态
-        
-        # 控制参数
+          # 控制参数
         self.speed_levels = [0.2, 0.5, 0.8, 1.2, 1.5, 2.0]
         self.current_speed_index = 2
         self.max_turn_speed = 1.0
         self.height_levels = [0.15, 0.20, 0.25, 0.30, 0.35]
         self.current_height_index = 2
         self.deadzone = 0.1  # 手柄死区
+        
+        # 跳舞功能
+        self.dance_executor = DanceExecutor() if DanceExecutor else None
+        self.is_dancing = False
+        self.dance_thread = None
         
         # 当前状态
         self.current_vx = 0.0
@@ -120,14 +133,14 @@ class RobodogUnifiedGUI:
         
         # 创建主容器和滚动条
         self.setup_scrollable_frame()
-        
-        # 设置各个区域
+          # 设置各个区域
         self.setup_connection_area()
         self.setup_control_mode_area()
         self.setup_parameters_area()
         self.setup_keyboard_area()
         self.setup_gamepad_area()
         self.setup_gui_buttons_area()
+        self.setup_dance_area()  # 新增跳舞区域
         self.setup_status_area()
         
         # 设置键盘事件
@@ -354,8 +367,7 @@ class RobodogUnifiedGUI:
             ('e', '右转', 0, 2),
             ('a', '左移', 1, 0),
             ('s', '后退', 1, 1),
-            ('d', '右移', 1, 2),
-        ]
+            ('d', '右移', 1, 2),        ]
         
         for key, text, row, col in button_config:
             btn = ttk.Button(button_grid, text=text, width=8)
@@ -363,6 +375,45 @@ class RobodogUnifiedGUI:
             btn.bind('<Button-1>', lambda e, k=key: self.on_button_press(k))
             btn.bind('<ButtonRelease-1>', lambda e, k=key: self.on_button_release(k))
             self.move_buttons[key] = btn
+    
+    def setup_dance_area(self):
+        """设置跳舞功能区域"""
+        dance_frame = ttk.LabelFrame(self.main_frame, text="🕺 跳舞功能 (概念验证)", padding="10")
+        dance_frame.pack(fill="x", pady=(0, 10))
+        
+        if not self.dance_executor:
+            ttk.Label(dance_frame, text="跳舞模块未加载，请检查dance模块安装", 
+                     foreground="red").pack()
+            return
+        
+        # 动作选择区域
+        action_frame = ttk.Frame(dance_frame)
+        action_frame.pack(fill="x", pady=(0, 10))
+        
+        ttk.Label(action_frame, text="选择动作:", font=("Arial", 10, "bold")).pack(side="left", padx=(0, 10))
+        
+        # 获取可用动作
+        available_actions = self.dance_executor.get_available_actions()
+        
+        # 为每个动作创建按钮
+        for action_name in available_actions:
+            ttk.Button(action_frame, text=action_name, 
+                      command=lambda name=action_name: self.start_dance_action(name)).pack(side="left", padx=(0, 5))
+        
+        # 控制按钮区域
+        control_frame = ttk.Frame(dance_frame)
+        control_frame.pack(fill="x")
+        
+        self.dance_stop_btn = ttk.Button(control_frame, text="停止跳舞", 
+                                       command=self.stop_dance_action, state="disabled")
+        self.dance_stop_btn.pack(side="left", padx=(0, 10))
+        
+        self.dance_status_label = ttk.Label(control_frame, text="状态: 准备就绪")
+        self.dance_status_label.pack(side="left", padx=(0, 10))
+        
+        # 当前动作信息显示
+        self.current_action_label = ttk.Label(control_frame, text="", foreground="blue")
+        self.current_action_label.pack(side="right")
     
     def setup_status_area(self):
         """设置状态显示和控制区域"""
@@ -682,6 +733,10 @@ class RobodogUnifiedGUI:
         """停止控制"""
         self.running = False
         
+        # 停止跳舞
+        if self.is_dancing:
+            self.stop_dance_action()
+        
         if self.control_thread and self.control_thread.is_alive():
             self.control_thread.join(timeout=1)
         
@@ -909,8 +964,7 @@ class RobodogUnifiedGUI:
         
         # 初始状态检查
         self.root.after(100, self.initial_status_check)
-        
-        # 运行主循环
+          # 运行主循环
         self.root.mainloop()
     
     def initial_status_check(self):
@@ -923,6 +977,126 @@ class RobodogUnifiedGUI:
             self.log_message("ℹ️ 未检测到游戏手柄，如需使用手柄请连接后点击'刷新手柄'")
             
         self.log_message("ℹ️ 请选择控制模式并连接机器狗后开始控制")
+    
+    # 跳舞功能相关方法
+    def start_dance_action(self, action_name):
+        """开始执行跳舞动作"""
+        if not self.connected or not self.dog:
+            messagebox.showwarning("警告", "请先连接机器狗")
+            return
+        
+        if self.is_dancing:
+            messagebox.showwarning("警告", "已经在跳舞中，请先停止当前动作")
+            return
+        
+        if not self.dance_executor:
+            messagebox.showerror("错误", "跳舞模块未加载")
+            return
+        
+        # 获取动作信息
+        action = self.dance_executor.get_action(action_name)
+        if not action:
+            messagebox.showerror("错误", f"动作 '{action_name}' 未找到")
+            return
+        
+        # 停止当前控制
+        if self.control_active:
+            self.stop_control()
+        
+        # 开始跳舞
+        self.is_dancing = True
+        self.dance_executor.start_action(action_name)
+        
+        # 更新界面状态
+        self.dance_stop_btn.configure(state="normal")
+        self.dance_status_label.configure(text=f"状态: 正在跳舞")
+        self.current_action_label.configure(text=f"当前动作: {action_name} ({action.duration:.1f}s)")
+        
+        # 启动跳舞线程
+        self.dance_thread = threading.Thread(target=self._dance_control_loop, daemon=True)
+        self.dance_thread.start()
+        
+        self.log_message(f"🕺 开始跳舞动作: {action_name} ({action.description})")
+    
+    def stop_dance_action(self):
+        """停止跳舞动作"""
+        if not self.is_dancing:
+            return
+        
+        self.is_dancing = False
+        
+        if self.dance_executor:
+            self.dance_executor.stop_action()
+        
+        # 重置机器狗姿态
+        if self.dog and self.connected:
+            try:
+                self.dog.body_height = 0.25
+                self.dog.pitch = 0.0
+                self.dog.roll = 0.0
+                self.dog.yaw = 0.0
+                self.dog.vx = 0.0
+                self.dog.vy = 0.0
+                self.dog.wz = 0.0
+            except Exception as e:
+                self.log_message(f"❌ 重置姿态失败: {e}")
+        
+        # 更新界面状态
+        self.dance_stop_btn.configure(state="disabled")
+        self.dance_status_label.configure(text="状态: 准备就绪")
+        self.current_action_label.configure(text="")
+        
+        self.log_message("🛑 停止跳舞动作")
+    
+    def _dance_control_loop(self):
+        """跳舞控制循环"""
+        try:
+            while self.is_dancing and self.connected and self.dog:
+                if not self.dance_executor or not self.dance_executor.is_dancing:
+                    break
+                
+                # 获取当前应该执行的姿态
+                current_pose = self.dance_executor.get_current_pose()
+                
+                # 应用姿态到机器狗
+                try:
+                    self.dog.body_height = current_pose.body_height
+                    self.dog.pitch = current_pose.pitch
+                    self.dog.roll = current_pose.roll
+                    self.dog.yaw = current_pose.yaw
+                    # 简化移动控制，避免机器狗移动太快
+                    self.dog.vx = current_pose.x * 0.1
+                    self.dog.vy = current_pose.y * 0.1
+                    
+                except Exception as e:
+                    self.log_message(f"❌ 动作执行错误: {e}")
+                    break
+                
+                # 检查动作是否完成
+                if self.dance_executor.is_action_finished():
+                    break
+                
+                time.sleep(0.05)  # 20Hz更新频率
+                
+        except Exception as e:
+            self.log_message(f"❌ 跳舞控制循环错误: {e}")
+        finally:
+            # 确保停止跳舞
+            self.root.after(0, self.stop_dance_action)
+    
+    def _reset_dog_pose(self):
+        """重置机器狗姿态到默认状态"""
+        if self.dog and self.connected:
+            try:
+                self.dog.body_height = 0.25
+                self.dog.pitch = 0.0
+                self.dog.roll = 0.0
+                self.dog.yaw = 0.0
+                self.dog.vx = 0.0
+                self.dog.vy = 0.0
+                self.dog.wz = 0.0
+            except Exception as e:
+                self.log_message(f"❌ 重置姿态失败: {e}")
 
 if __name__ == '__main__':
     try:
